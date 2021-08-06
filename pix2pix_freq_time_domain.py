@@ -59,7 +59,7 @@ class ConvTasNetParam:
     def __init__(self,
                  causal: bool = False,
                  That: int = 256,
-                 L: int = 256,
+                 L: int = 16,
 
                  overlap: int = 0):
 
@@ -90,8 +90,12 @@ def wave_to_spec(audio, param = ConvTasNetParam()):
             begin = (i * param.That + j) * (param.L - param.overlap)
             end = begin + param.L
             model_input[i][j] = audio[begin:end]
+    
+    whole_picture = np.zeros((param.That, num_portions*param.L))
+    for i in range(num_portions):
+       whole_picture[:param.That, i*param.L:i*param.L+param.L] = model_input[i]
 
-    return model_input
+    return whole_picture
 #%%
 mag_max = []
 mag_min = []
@@ -426,10 +430,15 @@ checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
 for inp, tar in test_dataset.take(40):
   generate_images(generator, inp, tar)
 #%%
-def return_to_audio(data, param = ConvTasNetParam()):
-    data = data[:,:,:,0]
+def return_to_audio(whole_picture, param = ConvTasNetParam()):
+    
+    data = np.zeros((int(65536/(param.That*param.L)), param.That, param.L)).astype('float32')
+    
+    for i in range(int(65536/(param.That*param.L))):
+        data[i] = whole_picture[:,i*param.L:i*param.L + param.L]
+       
     re_audio = np.zeros((65536)).astype('float32')
-    for i in range(1):
+    for i in range(int(65536/(param.That*param.L))):
         for j in range(param.That):
             begin = (i * param.That + j) * (param.L - param.overlap)
             end = begin + param.L
@@ -488,18 +497,14 @@ for inp, tar in test_dataset.take(40):
   gen_mag = np.array(prediction[0][:,:,0])
   gt_mag = np.array(tar[0][:,:,0])
 
-  gen_ang = np.array(prediction[0][:,:,1])
-  gen_orang = np.array(inp[0][:,:,1])
-  gt_ang = np.array(tar[0][:,:,1])
-
   gen_mag_denorm = denormalization(gen_mag, -1, 1, max_mag_clean, min_mag_clean)
   gt_mag_denorm = denormalization(gt_mag, -1, 1, max_mag_clean, min_mag_clean)
 
   gen_db_amp = librosa.db_to_amplitude(gen_mag_denorm)
   gt_db_amp = librosa.db_to_amplitude(gt_mag_denorm)
 
-  re_audio = return_to_audio(prediction)
-  ground_truth = return_to_audio(tar)
+  re_audio = return_to_audio(prediction[0][:,:,1])
+  ground_truth = return_to_audio(tar[0][:,:,1])
   
   pre_stft = librosa.stft(re_audio, n_fft=n_fft, hop_length=hop_length)
   gt_stft = librosa.stft(ground_truth, n_fft=n_fft, hop_length=hop_length)
@@ -516,4 +521,25 @@ for inp, tar in test_dataset.take(40):
   soundfile.write('C:/Users/NGV32/.spyder-py3/hyundai_project/output/1060ea_prediction/gen_wav_{}.wav' .format(count), gen_wav, sr)
   soundfile.write('C:/Users/NGV32/.spyder-py3/hyundai_project/output/1060ea_ground_truth/gt_wav_{}.wav' .format(count), gt_wav, sr)
 
+  count += 1
+#%%
+import soundfile
+
+count = 0
+
+for inp, tar in test_dataset.take(40):
+  prediction = generator(inp, training = True)
+  
+  
+  re_audio = return_to_audio(prediction[0][:,:,1])
+  Input = return_to_audio(inp[0][:,:,1])
+  ground_truth = return_to_audio(tar[0][:,:,1])
+
+  soundfile.write('C:/Users/NGV32/.spyder-py3/hyundai_project/output/1060ea_prediction_timedomain/gen_wav_{}.wav' .format(count), 
+                  re_audio, sr)
+
+  plt.plot(Input)
+  plt.plot(re_audio, 'r')
+  plt.plot(ground_truth, 'g')
+  plt.show()
   count += 1
